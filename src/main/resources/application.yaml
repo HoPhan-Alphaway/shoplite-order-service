@@ -1,0 +1,72 @@
+spring:
+  application:
+    name: order-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/orders}
+    username: ${DB_USER:orders_app}
+    password: ${DB_PASSWORD:orders_pw}
+  mvc:
+    problemdetails:
+      enabled: true
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      acks: all
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${OIDC_ISSUER_URI:http://auth.localhost:8000/realms/shoplite}
+      # Machine-to-machine: order-service gets its own token (client credentials grant)
+      # to call product-service's internal /reserve endpoint.
+      client:
+        registration:
+          product-api:
+            provider: keycloak
+            client-id: order-service
+            client-secret: ${OIDC_CLIENT_SECRET:order-service-dev-secret}
+            authorization-grant-type: client_credentials
+        provider:
+          keycloak:
+            token-uri: ${OIDC_TOKEN_URI:http://auth.localhost:8000/realms/shoplite/protocol/openid-connect/token}
+
+shoplite:
+  product-service-url: ${PRODUCT_SERVICE_URL:http://localhost:8082}
+  kafka:
+    order-created-topic: order.created
+    replicas: ${KAFKA_TOPIC_REPLICAS:1}
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      product-service:
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 15s
+        permitted-number-of-calls-in-half-open-state: 2
+        # 4xx = business answer (not found, out of stock), not a sign product-service is unhealthy.
+        ignore-exceptions:
+          - org.springframework.web.client.HttpClientErrorException
+  timelimiter:
+    instances:
+      product-service:
+        timeout-duration: 4s
+
+server:
+  port: 8080
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,circuitbreakers
+  endpoint:
+    health:
+      probes:
+        enabled: true
